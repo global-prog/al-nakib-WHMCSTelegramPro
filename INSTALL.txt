@@ -1,0 +1,192 @@
+================================================================================
+WHMCS TELEGRAM PRO - INSTALLATION GUIDE
+Version 4.1.0
+Developed By: RAQEEB AL-NAQEEB - AL-NAKIB LTD DEV TEAM
+================================================================================
+
+INSTALLATION INSTRUCTIONS
+================================================================================
+
+STEP 1: EXTRACT FILES
+----------------------
+Extract the contents of this ZIP file to your WHMCS installation directory:
+
+   YOUR-WHMCS-PATH/modules/notifications/
+
+After extraction, you should have this structure:
+
+   YOUR-WHMCS-PATH/
+   └── modules/
+       └── notifications/
+           └── WHMCSTelegramPro/
+               ├── WHMCSTelegramPro.php
+               ├── admin_panel.php
+               ├── logo.svg
+               ├── whmcs.json
+               ├── README.md
+               ├── PRODUCTION_CHECKLIST.md
+               ├── CLAUDE.md
+               └── INSTALL.txt (this file)
+
+
+STEP 2: SET FILE PERMISSIONS (Linux/Unix only)
+-----------------------------------------------
+If you're on Linux/Unix, set proper permissions:
+
+   chmod 755 /path/to/whmcs/modules/notifications/WHMCSTelegramPro
+   chmod 644 /path/to/whmcs/modules/notifications/WHMCSTelegramPro/*.php
+   chmod 644 /path/to/whmcs/modules/notifications/WHMCSTelegramPro/*.*
+
+
+STEP 3: ACTIVATE IN WHMCS
+--------------------------
+1. Log in to your WHMCS Admin Panel
+2. Navigate to: Setup → Staff Management → Notification Providers
+3. Find "WHMCS Telegram Pro" in the list
+4. Click "Configure"
+5. Enter your Telegram Bot Token (get from @BotFather)
+6. Enter your Default Chat ID
+7. Click "Test Settings" to verify connection
+8. Save settings
+
+
+STEP 4: CREATE NOTIFICATION RULES
+----------------------------------
+1. Navigate to: Setup → Notifications → Configure Notifications
+2. Click "Create New Notification Rule"
+3. Select "WHMCS Telegram Pro" as the provider
+4. Choose the events you want to monitor:
+   - Invoice Created
+   - Invoice Paid
+   - Ticket Opened
+   - Client Signup
+   - Order Placed
+   - etc.
+5. Configure message format and settings
+6. Save the rule
+
+
+STEP 5: TEST THE MODULE
+------------------------
+Option 1: Use Built-in Test
+   - Go to Notification Provider settings
+   - Click "Test Settings" button
+   - Check your Telegram for test message
+
+Option 2: Use Admin Panel
+   - Visit: YOUR-WHMCS-URL/modules/notifications/WHMCSTelegramPro/admin_panel.php
+   - Must be logged in as WHMCS admin
+   - Test bot token and send test messages
+
+Option 3: Trigger Real Event
+   - Create a test invoice
+   - Open a support ticket
+   - Check Telegram for notifications
+
+
+REQUIREMENTS
+================================================================================
+- WHMCS 8.0 or higher
+- PHP 7.4 or higher
+- Telegram Bot Token (from @BotFather)
+- Telegram Chat ID or Channel ID
+- Internet connection to Telegram API
+
+
+GETTING TELEGRAM BOT TOKEN
+================================================================================
+1. Open Telegram and search for @BotFather
+2. Send: /newbot
+3. Follow the prompts to create your bot
+4. Copy the bot token (format: 1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ)
+5. Use this token in WHMCS Telegram Pro settings
+
+
+GETTING TELEGRAM CHAT ID
+================================================================================
+Method 1: For Personal Chat
+   1. Search for @userinfobot on Telegram
+   2. Start the bot
+   3. It will show your Chat ID
+
+Method 2: For Groups/Channels
+   1. Add your bot to the group/channel
+   2. Send a message in the group
+   3. Visit: https://api.telegram.org/bot<YOUR-BOT-TOKEN>/getUpdates
+   4. Look for "chat":{"id": in the response
+   5. Use that ID (will be negative for groups, like -1001234567890)
+
+
+TROUBLESHOOTING
+================================================================================
+
+Module Not Showing Up:
+   - Verify files are in correct location
+   - Check file permissions
+   - Check WHMCS activity log for errors
+   - Verify PHP version (7.4+)
+
+Cannot Activate Module:
+   - Check PHP syntax: php -l WHMCSTelegramPro.php
+   - Verify WHMCS version (8.0+)
+   - Check WHMCS error logs
+
+Test Connection Fails:
+   - Verify bot token is correct
+   - Check internet connectivity
+   - Ensure bot is active (send /start to bot)
+
+No Notifications Received:
+   - Verify notification rules are created
+   - Check chat ID is correct
+   - Enable Debug Mode in provider settings
+   - Check WHMCS Activity Log
+
+Messages Show Errors:
+   - Verify parse mode (HTML/Markdown)
+   - Check message format settings
+   - Enable debug logging
+
+
+FEATURES
+================================================================================
+✅ ZERO Duplicate Messages - Advanced duplicate detection
+✅ Comprehensive Data Extraction - Invoice items, ticket details, orders
+✅ Professional Formatting - Clean, structured messages
+✅ Multiple Message Formats - Professional, Detailed, Compact, Custom
+✅ Smart Detection System - Automatically identifies notification types
+✅ Secure Admin Panel - Test and configure with web interface
+✅ Debug Mode - Detailed logging for troubleshooting
+✅ Custom Templates - Create your own message formats
+✅ Silent Notifications - Optional sound-free messages
+
+
+SUPPORT
+================================================================================
+Documentation: https://github.com/global-prog/al-nakib-WHMCSTelegramPro
+Issues: https://github.com/global-prog/al-nakib-WHMCSTelegramPro/issues
+Author: RAQEEB AL-NAQEEB - AL-NAKIB LTD DEV TEAM
+
+
+SECURITY NOTES
+================================================================================
+- Bot tokens are stored securely
+- Admin panel requires WHMCS authentication
+- All inputs are validated and sanitized
+- Debug mode disabled by default
+- No sensitive data logged in production
+
+
+VERSION INFORMATION
+================================================================================
+Version: 4.1.0
+Release Date: January 2025
+Status: Production Ready
+License: MIT License
+Tested With: WHMCS 8.0+, PHP 7.4+
+
+
+================================================================================
+Thank you for using WHMCS Telegram Pro!
+Developed by RAQEEB AL-NAQEEB - AL-NAKIB LTD DEV TEAM
+================================================================================
