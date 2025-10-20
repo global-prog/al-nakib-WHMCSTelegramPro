@@ -1,0 +1,186 @@
+# WHMCS Telegram Pro - Gitignore
+# Author: RAQEEB AL-NAQEEB - AL-NAKIB LTD DEV TEAM
+
+# ====================
+# Critical & Sensitive Files
+# ====================
+
+# Configuration files with sensitive data
+config.php
+configuration.php
+*.config.php
+
+# Database backups and exports
+*.sql
+*.sqlite
+*.db
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# API Keys and Tokens
+tokens.txt
+keys.txt
+credentials.txt
+secrets.txt
+
+# ====================
+# Claude Code & AI Related
+# ====================
+
+# Claude Code configuration
+.claude/
+.claude_history
+.clauderc
+
+# Claude messages and sessions
+.claude-messages/
+claude-sessions/
+
+# AI assistant files
+.cursor/
+.copilot/
+.ai/
+
+# ====================
+# Development Files
+# ====================
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# PhpStorm
+.phpstorm.meta.php
+_ide_helper.php
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ====================
+# Temporary & Cache Files
+# ====================
+
+# PHP temporary files
+*.tmp
+*.temp
+*.cache
+
+# Logs
+*.log
+logs/
+error_log
+debug.log
+
+# Compiled files
+*.compiled
+
+# ====================
+# Backup Files
+# ====================
+
+# Backups
+*.bak
+*.backup
+*.old
+*_backup
+*_old
+backup/
+backups/
+
+# ====================
+# OS Generated Files
+# ====================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+
+# ====================
+# Version Control
+# ====================
+
+# Git
+.git/
+.gitattributes
+
+# SVN
+.svn/
+
+# ====================
+# Testing & Development
+# ====================
+
+# Test files
+test.php
+tests/
+phpunit.xml
+.phpunit.result.cache
+
+# Development files
+dev/
+development/
+sandbox/
+scratch/
+
+# Node modules (if any frontend build tools used)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Composer (if used)
+vendor/
+composer.lock
+
+# ====================
+# Documentation Drafts
+# ====================
+
+# Draft documentation
+DRAFT.md
+TODO.md
+NOTES.md
+scratch.md
+
+# ====================
+# Distribution Files
+# ====================
+
+# Compiled distributions
+dist/
+build/
+release/
+*.zip
+*.tar.gz
+*.rar
+
+# ====================
+# WHMCS Specific
+# ====================
+
+# WHMCS configuration (if accidentally copied)
+configuration.php
+license.key
+
+# Module specific temp files
+*.whmcs.tmp
