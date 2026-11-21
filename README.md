@@ -1,134 +1,147 @@
 # WHMCS Telegram Pro
-## Version 4.1.0 - Professional Notification System
-**Developed By: RAQEEB AL-NAQEEB - AL-NAKIB LTD DEV TEAM**
 
-### 🚀 Features
-- ✅ **ZERO Duplicate Messages** - Advanced content-based duplicate detection
-- 📊 **Comprehensive Data Extraction** - ALL invoice items, ticket messages, order details
-- 🎯 **Smart Detection** - Automatically extracts relevant WHMCS data
-- ⚡ **High Performance** - Optimized database queries and caching
-- 🔒 **Enterprise Security** - Input validation, secure tokens, admin-only access
-- 📱 **Professional Formatting** - Clean, informative messages with status icons
-- 🧾 **Invoice Breakdown** - Complete itemized lists with tax calculations
-- 💬 **Ticket Previews** - Message excerpts, reply statistics, time tracking
-- 📦 **Order Details** - All items, promo codes, nameservers, and more
+Version 4.2.2 - Telegram notifications for WHMCS
 
-### 📦 Installation
+Developed by RAQEEB AL-NAQEEB - AL-NAKIB LTD DEV TEAM
 
-1. **Upload Module**
-   - Extract the `WHMCSTelegramPro` folder to `/modules/notifications/` in your WHMCS installation
-   - The path should be: `/your-whmcs/modules/notifications/WHMCSTelegramPro/`
+## Features
 
-2. **Set Permissions**
+- Sends WHMCS notification rule events (invoices, tickets, orders, services, domains, clients) to Telegram
+- Clear default message: a headline, a one-line summary (number, status, amount), the key facts, and a link back to WHMCS
+- Invoice details: items, tax, credit, due and paid dates, overdue days, payment method
+- Ticket details: subject, department, assignee, related service, message counts, and the latest message
+- Order details: services, domains and addons, invoice, promo code, nameservers
+- Four formats: Professional (default), Detailed, Compact, and Custom templates
+- Duplicate prevention per chat, with a configurable time window
+- Failed sends never interrupt WHMCS; they are logged instead
+- Diagnostics panel that tests delivery from the server itself and shows the plugin log
+- Plain text formatting, no emoji
+
+## Requirements
+
+- WHMCS 8.x or 9.0
+- PHP 7.4 to 8.3 (WHMCS 9.0 itself requires PHP 8.2 or newer)
+- PHP cURL extension (recommended), or allow_url_fopen with OpenSSL
+- Outbound HTTPS from the server to api.telegram.org
+
+## Installation
+
+1. Upload the `WHMCSTelegramPro` folder to `/modules/notifications/` so the path is
+   `/your-whmcs/modules/notifications/WHMCSTelegramPro/`.
+2. Set permissions. The folder must be writable by the web server user so the plugin can create `logs/`:
+
    ```bash
    chmod 755 /path/to/whmcs/modules/notifications/WHMCSTelegramPro
    chmod 644 /path/to/whmcs/modules/notifications/WHMCSTelegramPro/*.php
    ```
 
-3. **Configure in WHMCS**
-   - Navigate to: Setup → Staff Management → Notification Providers
-   - Click "Configure" on "WHMCS Telegram Pro"
-   - Enter your Bot Token (get from @BotFather on Telegram)
-   - Enter default Chat ID (your Telegram chat/channel ID)
-   - Configure settings as needed
+3. In WHMCS go to Setup > Staff Management > Notification Providers, configure "WHMCS Telegram Pro",
+   enter the bot token and default chat ID, and click Test Settings.
+4. Go to Setup > Notifications, create a rule, and choose WHMCS Telegram Pro as the provider.
 
-### ⚙️ Configuration Settings
+## Settings
+
+Provider settings:
 
 | Setting | Recommended | Description |
 |---------|-------------|-------------|
-| Bot Token | Required | Your Telegram bot token from @BotFather |
-| Default Chat ID | Required | Default Telegram chat/channel ID |
-| Duplicate Prevention | Medium (5 min) | Prevents duplicate notifications |
-| Debug Mode | No | Enable only for troubleshooting |
-| Parse Mode | HTML | Message formatting mode |
-| Include URL | Yes | Add WHMCS links to messages |
+| Bot Token | Required | Token from @BotFather |
+| Default Chat ID | Required unless every rule sets its own | Numeric ID (for example -1001234567890) or @channelname |
+| Enable Debug Logging | Off | Writes diagnostic entries to the plugin log |
+| Duplicate Prevention | Medium (5 min) | Blocks identical notifications to the same chat within the window |
 
-### 🎯 Notification Types Supported
+Per-rule settings: Chat ID (overrides the default), Message Format, Custom Template,
+Include Direct Link, Silent Notification.
 
-- **Invoices**: Complete breakdown with items, tax, subtotal, payment info, overdue warnings
-- **Support Tickets**: Message previews, reply counts, assignment info, related services
-- **Orders**: Full item lists, promo codes, invoices, nameservers, billing cycles
-- **Clients**: New signup, profile updates with all details
-- **Services**: Provisioning, suspension, termination
-- **Domains**: Registration, renewal, transfer
+Custom template variables: `{title}`, `{message}`, `{client}`, `{amount}`, `{status}`, `{type}`, `{url}`,
+`{date}`, `{items}`, and any other field the module collects (for example `{due_date}`, `{priority}`,
+`{latest_message}`). Telegram HTML tags such as `<b>`, `<i>` and `<a>` may be used in the template;
+inserted values are always escaped.
 
-### 📋 Enhanced Information Display
+## Diagnostics panel
 
-**Invoice Notifications Include:**
-- Itemized list of all invoice items with amounts
-- Subtotal, Tax (with rates), Credit Applied
-- Invoice/Due/Paid dates
-- Days overdue warnings (if applicable)
-- Payment method information
-- Client company, phone, country
+Open `/modules/notifications/WHMCSTelegramPro/admin_panel.php` while logged in to the WHMCS admin area
+(there is also a link in the Bot Token setting). It shows:
 
-**Ticket Notifications Include:**
-- First 200 characters of ticket message
-- Total messages with client/staff breakdown
-- Time since last update (human-readable)
-- Related service/product information
-- Assignment and department details
-- Priority with color-coded icons
-- CC emails, flags, IP address
+- Server environment: PHP, cURL, OpenSSL, log folder, duplicate table
+- Connection to Telegram: DNS and HTTPS checks from the server
+- Send a test message: runs the module's own sending code from the server
+- Plugin log: the latest entries, with a Clear log button
 
-**Order Notifications Include:**
-- Complete list of all order items (products, domains, addons)
-- Billing cycles and registration periods
-- Associated invoice with status
-- Promo code with discount details
-- Custom nameservers if specified
-- Order date and payment method
+## Logging
 
-### 🔧 Troubleshooting
+- Errors and debug entries go to `modules/notifications/WHMCSTelegramPro/logs/error_log.php`.
+- The file never exceeds 5 MB: when it is full the oldest entries are dropped.
+- The file starts with a PHP exit line, so it cannot be downloaded over the web.
+- Each failure also adds one short line to the WHMCS Activity Log.
+- Debug entries record what happened, not client personal data.
 
-1. **Enable Debug Mode**
-   - Set "Debug Logging" to "Yes" in provider settings
-   - Check WHMCS Activity Log for "WHMCS Telegram Pro" entries
+## Troubleshooting
 
-2. **Test Connection**
-   - Use the test feature in provider configuration
-   - Visit `/modules/notifications/WHMCSTelegramPro/admin_panel.php` (admin login required)
+- No notifications: open the diagnostics panel and run "Check connection". If it fails, the server
+  cannot reach Telegram (firewall, hosting provider block, or missing cURL/OpenSSL).
+- "Invalid bot token": copy the token again from @BotFather.
+- "chat not found": the bot must be a member (or admin, for channels) of the chat, and the chat ID must be exact.
+- Group upgraded to a supergroup: the plugin redirects messages and logs the new chat ID; update the setting.
+- Duplicates: raise the Duplicate Prevention window.
 
-3. **Common Issues**
-   - **No notifications**: Check bot token and chat ID
-   - **Duplicates**: Increase duplicate prevention window
-   - **Missing data**: Enable debug mode to see data extraction
+## Version history
 
-### 📊 Version History
+**v4.2.2** (current)
+- Any PHP error during a database lookup (not only database exceptions) now just leaves that detail
+  out; previously it could stop the notification from being sent
+- A new reply to a ticket is never blocked as a duplicate of the previous reply, even when WHMCS
+  sends the same text for both; repeated copies of the same event are still blocked
+- A failure while recording a sent notification no longer blocks the next delivery of that event
+- Messages are never sent empty: a blank title gets a generic headline, and a custom template that
+  produces no text falls back to the Professional format
+- When Telegram rejects the formatting, the plain-text resend keeps the link back to WHMCS
+- The ticket's latest message is no longer shown twice when WHMCS includes it in the notification text
+- Works when the host disables curl_exec (falls back to the stream method); no curl_close()
+  deprecation notice on newer PHP versions
+- Diagnostics panel explains common connection errors (DNS, firewall, timeout, certificates) and
+  resolves IPv6-only hosts
 
-**v4.1.0** (Current)
-- Complete rebranding to WHMCS Telegram Pro
-- Comprehensive data extraction for all notification types
-- Invoice items breakdown with full financial details
-- Ticket message previews and reply statistics
-- Order complete item lists with all metadata
-- Enhanced professional message formatting
-- Improved error handling and logging
-- Developed by RAQEEB AL-NAQEEB - AL-NAKIB LTD DEV TEAM
+**v4.2.1**
+- Diagnostics panel rebuilt: tests run on the server, environment and network checks, log viewer;
+  access is denied whenever the admin session or permission cannot be verified
+- A failure while logging can no longer escape and interrupt WHMCS
+- Invoice and order title lookups match the displayed number before the database ID
+- Duplicate prevention claims a notification before sending, so simultaneous duplicates are blocked
+- Bot token and chat ID are validated with clear error messages
+- Currency amounts follow the WHMCS currency format setting
+- All promo code types are described correctly
+- Messages in any language are kept (the repeated-text check is Unicode aware)
+- Links are only created for absolute http(s) URLs
+- Debug log no longer stores client personal data
+- Supergroup chat ID changes are handled
+- All files are plain ASCII
 
-### 🔒 Security Notes
+**v4.2.0**
+- Removed emoji; fixed the Custom Template crash; fixed order and ticket data lookups
+- Uses WHMCS notification attributes for every event type
+- Duplicate prevention moved to its own table and made per chat
+- Yes/No settings work with the values WHMCS saves
+- Failed sends are logged instead of breaking the WHMCS page; 5 MB capped plugin log
+- Domain transfer secrets are never included in messages
+- Redesigned default message
 
-- Bot tokens are stored encrypted
-- Admin panel requires WHMCS authentication
-- All inputs are validated and sanitized
-- Debug mode disabled by default
-- No sensitive data logged in production
+**v4.1.0**
+- Rebranded to WHMCS Telegram Pro
 
-### 📞 Support
+## Security notes
 
-For issues or questions:
-- Check PRODUCTION_CHECKLIST.md for deployment guide
-- Enable debug mode for detailed logging
-- Review WHMCS activity log for errors
-- Visit: https://github.com/global-prog/al-nakib-WHMCSTelegramPro
+- The bot token is stored by WHMCS as a password setting and is never written to logs
+- The diagnostics panel requires an authenticated WHMCS admin session and a configuration permission,
+  and its forms are protected against cross-site request forgery
+- All values placed into messages and pages are escaped
+- TLS certificates are verified for every request to Telegram
 
-### 📄 License
+## Support
 
-MIT License - See LICENSE file for details
+- Repository: https://github.com/global-prog/al-nakib-WHMCSTelegramPro
+- Deployment guide: PRODUCTION_CHECKLIST.md
 
----
+## License
 
-**Production Ready** - All security and performance checks passed
-**Tested With** - WHMCS 8.0+, PHP 7.4+
-**Developed By** - RAQEEB AL-NAQEEB - AL-NAKIB LTD DEV TEAM
-**Last Updated** - January 2025
+MIT (as declared in whmcs.json)

@@ -1,0 +1,124 @@
+================================================================================
+WHMCS TELEGRAM PRO - INSTALLATION GUIDE
+Version 4.2.2
+Developed By: RAQEEB AL-NAQEEB - AL-NAKIB LTD DEV TEAM
+================================================================================
+
+
+REQUIREMENTS
+--------------------------------------------------------------------------------
+- WHMCS 8.x or 9.0
+- PHP 7.4 to 8.3 (WHMCS 9.0 itself requires PHP 8.2 or newer)
+- PHP cURL extension (recommended), or allow_url_fopen with OpenSSL
+- Outbound HTTPS from the server to api.telegram.org
+- A Telegram bot token (from @BotFather) and a chat ID
+
+
+STEP 1: UPLOAD THE FILES
+--------------------------------------------------------------------------------
+Extract this ZIP into your WHMCS modules folder:
+
+   YOUR-WHMCS-PATH/modules/notifications/
+
+You should end up with:
+
+   YOUR-WHMCS-PATH/modules/notifications/WHMCSTelegramPro/WHMCSTelegramPro.php
+   YOUR-WHMCS-PATH/modules/notifications/WHMCSTelegramPro/admin_panel.php
+   YOUR-WHMCS-PATH/modules/notifications/WHMCSTelegramPro/logo.svg
+   YOUR-WHMCS-PATH/modules/notifications/WHMCSTelegramPro/whmcs.json
+   YOUR-WHMCS-PATH/modules/notifications/WHMCSTelegramPro/README.md
+   YOUR-WHMCS-PATH/modules/notifications/WHMCSTelegramPro/PRODUCTION_CHECKLIST.md
+   YOUR-WHMCS-PATH/modules/notifications/WHMCSTelegramPro/INSTALL.txt
+
+When upgrading, replace the old files. Settings and rules are kept.
+
+
+STEP 2: PERMISSIONS (Linux)
+--------------------------------------------------------------------------------
+   chmod 755 /path/to/whmcs/modules/notifications/WHMCSTelegramPro
+   chmod 644 /path/to/whmcs/modules/notifications/WHMCSTelegramPro/*
+
+The folder must be owned by, or writable for, the web server user (for example
+"www" on aaPanel) so the plugin can create its logs/ folder.
+
+
+STEP 3: CONFIGURE THE PROVIDER
+--------------------------------------------------------------------------------
+1. Log in to the WHMCS admin area.
+2. Go to: Setup > Staff Management > Notification Providers
+3. Click Configure on "WHMCS Telegram Pro".
+4. Enter the Bot Token and the Default Chat ID.
+5. Click Test Settings, then Save.
+
+
+STEP 4: CREATE NOTIFICATION RULES
+--------------------------------------------------------------------------------
+1. Go to: Setup > Notifications
+2. Create a new rule and choose "WHMCS Telegram Pro" as the provider.
+3. Pick the events (invoice paid, ticket opened, order placed, and so on).
+4. Choose a message format (Professional is recommended) and save.
+
+
+STEP 5: TEST
+--------------------------------------------------------------------------------
+Open the diagnostics panel while logged in as an admin:
+
+   YOUR-WHMCS-URL/modules/notifications/WHMCSTelegramPro/admin_panel.php
+
+- "Check connection" confirms the server can reach Telegram.
+- "Send test from this server" sends a message using the module's own code.
+- The Plugin log section shows recent errors.
+
+Then trigger a real event, for example create a test invoice.
+
+
+GETTING A BOT TOKEN
+--------------------------------------------------------------------------------
+1. In Telegram, open @BotFather and send /newbot.
+2. Follow the prompts.
+3. Copy the token (format: 123456789:ABC...).
+
+
+GETTING A CHAT ID
+--------------------------------------------------------------------------------
+Personal chat:
+   Open @userinfobot in Telegram; it replies with your ID.
+
+Group or channel:
+   1. Add the bot to the group (for channels, make it an administrator).
+   2. Send a message in the group.
+   3. Open https://api.telegram.org/bot<YOUR-BOT-TOKEN>/getUpdates in a browser.
+   4. Use the "chat":{"id": value. Groups and channels have negative IDs,
+      for example -1001234567890. Public channels can also use @channelname.
+
+
+TROUBLESHOOTING
+--------------------------------------------------------------------------------
+Nothing arrives in Telegram:
+   Open the diagnostics panel and run "Check connection". If it fails, the
+   server cannot reach Telegram: check the firewall, ask the hosting provider
+   whether Telegram is blocked, and make sure PHP has cURL with OpenSSL.
+
+Errors while sending:
+   Read the Plugin log in the diagnostics panel, or the file
+   modules/notifications/WHMCSTelegramPro/logs/error_log.php
+   Each failure also adds one line to the WHMCS Activity Log.
+
+"Invalid bot token":
+   Copy the token again from @BotFather.
+
+"chat not found":
+   The bot must be in the chat (admin for channels) and the ID must be exact.
+
+More detail needed:
+   Enable Debug Logging in the provider settings, trigger the event again,
+   then read the plugin log. Turn Debug Logging off afterwards.
+
+
+VERSION INFORMATION
+--------------------------------------------------------------------------------
+Version:          4.2.2
+Release date:     November 2026
+License:          MIT
+Compatible with:  WHMCS 8.x and 9.0, PHP 7.4 to 8.3
+Support:          https://github.com/global-prog/al-nakib-WHMCSTelegramPro
