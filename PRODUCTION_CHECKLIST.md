@@ -1,230 +1,94 @@
-# Production Readiness Checklist for Working Alnakib Telegram Notifications
+# Production Checklist - WHMCS Telegram Pro 4.2.2
 
-## ✅ Security Checks
+## Requirements
 
-### 1. Input Validation ✅
-- [x] Bot token format validation (regex pattern)
-- [x] Chat ID format validation (numeric check)
-- [x] Message template sanitization
-- [x] HTML special characters escaping
-- [x] Strip existing HTML tags before processing
+- WHMCS 8.x or 9.0
+- PHP 7.4 to 8.3 (WHMCS 9.0 itself requires PHP 8.2 or newer; 8.3 recommended)
+- PHP cURL extension (recommended), or allow_url_fopen with OpenSSL
+- Outbound HTTPS from the server to `api.telegram.org`
+- A Telegram bot token from @BotFather, with the bot added to the target chat, group or channel
+- The module folder writable by the web server user (for the `logs/` folder)
 
-### 2. Authentication ✅
-- [x] Bot token verification with Telegram API
-- [x] WHMCS authentication check (`if (!defined("WHMCS"))`)
-- [x] SSL verification enabled for API calls
+## What the module does
 
-### 3. Data Protection ✅
-- [x] No sensitive data logged in production
-- [x] Debug mode disabled by default
-- [x] Password field type for bot token
-- [x] No credentials stored in plaintext
+### Security
+- [x] The module file cannot be run directly (`if (!defined("WHMCS"))`)
+- [x] The bot token is a password field in WHMCS, is never written to logs, and is redacted from error text
+- [x] Every value placed into a Telegram message or the diagnostics page is escaped
+- [x] Links are created only for absolute http(s) URLs
+- [x] Domain transfer secrets (EPP codes) are never included in messages
+- [x] TLS certificates are verified for every Telegram request
+- [x] Diagnostics panel: WHMCS admin session and a configuration permission, both failing closed
+      (if WHMCS cannot confirm either, access is denied), CSRF-protected forms with redirect after each
+      action, strict Content Security Policy, no external scripts or stylesheets, every test logged
+- [x] Nothing can escape `sendNotification()`: even a failure while logging is contained
+- [x] Debug entries record what happened, not client personal data
 
-## ✅ Error Handling
+### Delivery
+- [x] Bot token and chat ID formats are validated before calling Telegram, with clear errors
+- [x] Up to 2 attempts per message: Telegram rate limits (429, honouring `retry_after` up to 5 s)
+      and 5xx errors are retried; network errors are not, so a blocked network cannot stall WHMCS pages.
+      No new attempt starts after 15 seconds.
+- [x] Connection attempts time out after 5 seconds, requests after 10 seconds
+- [x] If Telegram rejects the HTML, the message is resent once as plain text
+- [x] If a group was upgraded to a supergroup, the message is redirected to the new chat ID and the
+      new ID is logged so the setting can be updated
+- [x] Message length is measured the way Telegram counts it; long messages are cut at a line break
+      with formatting kept valid; item lists are capped at 15 lines
+- [x] Duplicate prevention per chat (10, 5 or 2 minute window, or off). A notification is claimed in
+      `mod_whmcstelegrampro_sent` before sending, so two copies fired at the same moment cannot both go out;
+      the claim is released if sending fails. For tickets the latest reply is part of the check, so a new
+      reply is never mistaken for a duplicate. Rows are removed after 24 hours.
+- [x] Messages always have visible text (generic headline for a blank title; an empty custom template
+      falls back to the Professional format); the plain-text resend keeps link URLs
+- [x] Failures never interrupt WHMCS (a Telegram outage cannot break a ticket reply or checkout)
 
-### 1. API Errors ✅
-- [x] Network timeout handling
-- [x] Invalid response handling
-- [x] Authentication failure handling
-- [x] Rate limit error handling
+### Logging
+- [x] Errors and debug entries go to `logs/error_log.php`, plus one short Activity Log line per failure
+- [x] The log never exceeds 5 MB: when full, the oldest entries are dropped; one entry is capped at 64 KB
+- [x] The log starts with a PHP exit line and PHP open tags in logged text are broken up, so the file
+      cannot be downloaded or executed over the web (Apache or nginx)
+- [x] If `logs/` is not writable, errors fall back to the Activity Log
 
-### 2. Retry Logic ✅
-- [x] Configurable retry attempts
-- [x] Exponential backoff
-- [x] Max retry limit (3 attempts)
-- [x] Optional retry disable
+### Data
+- [x] Invoices: items, subtotal, tax, credit, due, paid and overdue details, gateway display name
+- [x] Tickets: subject, priority, department, assignee, message counts, related service, latest message
+- [x] Orders: services, domains and addons, invoice, promo code (all promotion types), nameservers
+- [x] Amounts follow each currency's WHMCS format setting
+- [x] Services, domains, clients and other events: the details WHMCS attaches to the notification
+- [x] Each database lookup fails on its own (any PHP error, not only database exceptions) and is
+      reported in the debug log, so a message is still sent
 
-### 3. Graceful Failures ✅
-- [x] Descriptive error messages
-- [x] Exception catching at all levels
-- [x] Fallback mechanisms
-- [x] No silent failures in critical paths
+## Not implemented
 
-## ✅ Performance Optimization
+- Configurable timeouts, retry counts or rate limits
+- Markdown parse mode (messages are always Telegram HTML)
+- Proxy support: the server needs direct outbound HTTPS to api.telegram.org
 
-### 1. Rate Limiting ✅
-- [x] Configurable rate limits (1-30 msgs/min)
-- [x] Per-minute tracking
-- [x] Automatic cleanup of old entries
-- [x] Database-based tracking
+## Deployment steps
 
-### 2. Message Handling ✅
-- [x] Message length validation (4096 chars max)
-- [x] Automatic truncation for long messages
-- [x] Efficient template processing
-- [x] Minimal database queries
+1. Upload the `WHMCSTelegramPro` folder to `/modules/notifications/WHMCSTelegramPro/`.
+2. Set permissions: 755 for the folder, 644 for files; the folder must be writable by the web server user.
+3. Open `/modules/notifications/WHMCSTelegramPro/admin_panel.php` and run "Check connection".
+   Fix any red items in "Server environment" first.
+4. Go to Setup > Staff Management > Notification Providers, configure "WHMCS Telegram Pro",
+   enter the bot token and default chat ID, then click Test Settings.
+5. Create rules under Setup > Notifications and trigger a real event (for example, create a test invoice).
+6. If something is missing, enable Debug Logging temporarily and read the plugin log in the diagnostics panel.
+7. Turn Debug Logging off again once everything works.
 
-### 3. Resource Management ✅
-- [x] Configurable timeouts (5-60 seconds)
-- [x] Stream context optimization
-- [x] Memory-efficient processing
-- [x] Connection reuse
+## Upgrading
 
-## ✅ Configuration
+From 4.2.0 or 4.2.1: replace the files. Nothing else is needed.
 
-### 1. Required Settings ✅
-- [x] Bot token (required)
-- [x] Default chat ID (optional with fallback)
-- [x] Parse mode selection
-- [x] Debug mode toggle
+From 4.1.0:
+- Replace the files. The duplicate-prevention table is created automatically on the first notification,
+  and the old `alnakib_...` rows are removed from `tblconfiguration` at the same time.
+- The Parse Mode setting has been removed; messages are always sent as HTML.
+- Custom templates that used `{icon}` still work; the placeholder now renders as nothing.
 
-### 2. Advanced Settings ✅
-- [x] Rate limiting control
-- [x] Retry configuration
-- [x] Timeout adjustment
-- [x] Silent notification option
-- [x] Web preview control
+## Recommendations
 
-### 3. Validation ✅
-- [x] Settings validation on save
-- [x] Test connection functionality
-- [x] Format validation for inputs
-- [x] Range validation for numeric inputs
-
-## ✅ Logging & Monitoring
-
-### 1. Debug Logging ✅
-- [x] Configurable debug mode
-- [x] Structured log messages
-- [x] Activity log integration
-- [x] Error trace logging
-
-### 2. Audit Trail ✅
-- [x] Notification attempt logging
-- [x] Success/failure tracking
-- [x] Rate limit monitoring
-- [x] Version information in logs
-
-## ✅ Compatibility
-
-### 1. WHMCS Compatibility ✅
-- [x] WHMCS 8.0+ support
-- [x] Proper namespace usage
-- [x] Interface implementation
-- [x] Native notification system integration
-
-### 2. PHP Compatibility ✅
-- [x] PHP 7.4+ support
-- [x] No deprecated functions
-- [x] Type safety where appropriate
-- [x] Error reporting compatibility
-
-### 3. Telegram API ✅
-- [x] Latest API endpoint usage
-- [x] All message types supported
-- [x] Parse mode flexibility
-- [x] Bot API compliance
-
-## ⚠️ Production Deployment Steps
-
-### 1. Pre-Deployment
-```bash
-1. Backup existing notification configuration
-2. Test in staging environment
-3. Verify bot token and permissions
-4. Configure rate limits appropriately
-```
-
-### 2. Installation
-```bash
-1. Extract to: /modules/notifications/WorkingAlnakib/
-2. Set permissions: 755 for directories, 644 for files
-3. Verify file ownership matches WHMCS
-```
-
-### 3. Configuration
-```
-1. Navigate to: Setup → Staff Management → Notification Providers
-2. Configure "Working Alnakib Telegram"
-3. Enter bot token and default chat ID
-4. Test connection
-5. Set debug mode to "No" for production
-6. Configure rate limit (recommended: 20 msgs/min)
-7. Enable retry on failure
-8. Set timeout to 30 seconds
-```
-
-### 4. Testing
-```
-1. Create test notification rule
-2. Trigger test event (e.g., create invoice)
-3. Verify message delivery
-4. Check WHMCS activity log
-5. Monitor rate limiting
-```
-
-### 5. Monitoring
-```
-1. Regular activity log review
-2. Failed notification monitoring
-3. Rate limit usage tracking
-4. API error frequency
-```
-
-## 🔒 Security Recommendations
-
-1. **API Token Security**
-   - Store bot token securely
-   - Use dedicated bot for production
-   - Rotate tokens periodically
-   - Monitor bot usage
-
-2. **Chat ID Management**
-   - Use private channels for sensitive data
-   - Verify chat ownership
-   - Document chat ID assignments
-   - Regular access review
-
-3. **Message Content**
-   - Avoid sending passwords
-   - Limit sensitive data in messages
-   - Use secure URLs only
-   - Enable web preview selectively
-
-## 📊 Performance Recommendations
-
-1. **Rate Limiting**
-   - Start with 20 msgs/min
-   - Monitor usage patterns
-   - Adjust based on volume
-   - Consider multiple bots for high volume
-
-2. **Message Templates**
-   - Keep templates concise
-   - Minimize variable usage
-   - Test template rendering
-   - Avoid complex HTML
-
-3. **Error Handling**
-   - Enable retry for production
-   - Monitor failure patterns
-   - Review error logs weekly
-   - Document common issues
-
-## ✅ Production Ready Status
-
-**Version**: 3.1.0 PRODUCTION
-**Status**: ✅ **READY FOR PRODUCTION**
-**Tested With**: WHMCS 8.0+, PHP 7.4+
-**Security**: ✅ All checks passed
-**Performance**: ✅ Optimized for production
-**Error Handling**: ✅ Comprehensive coverage
-
-## 📝 Notes
-
-- Default debug mode is OFF for production
-- Rate limiting prevents API abuse
-- Retry logic handles temporary failures
-- All inputs are validated and sanitized
-- Graceful degradation for non-critical features
-- Version tracking for troubleshooting
-
-## 🚀 Deployment Approval
-
-**Reviewed By**: Production Team
-**Date**: [Current Date]
-**Status**: **APPROVED FOR PRODUCTION DEPLOYMENT**
-
----
-
-*This module has passed all production readiness checks and is safe for deployment in live environments.*
+- Use a dedicated bot and private chats or channels, because messages contain client names, emails and amounts.
+- Rotate the bot token if it is ever exposed.
+- Keep Debug Logging off in normal operation.

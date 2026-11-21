@@ -2,27 +2,21 @@
   "schema": "1.0",
   "type": "notification_provider",
   "name": "WHMCSTelegramPro",
-  "version": "4.1.0",
+  "version": "4.2.2",
   "license": "MIT",
   "category": "notifications",
   "description": {
     "name": "WHMCS Telegram Pro",
-    "tagline": "Professional WHMCS notifications with comprehensive data extraction",
-    "long": "Professional Telegram notification module for WHMCS with advanced message formatting, intelligent duplicate prevention, and comprehensive real-time data extraction from WHMCS database. Features invoice items breakdown, ticket message previews, order details, and much more!",
+    "tagline": "Clear, reliable WHMCS notifications in Telegram",
+    "long": "Telegram notification provider for WHMCS. Sends invoice, ticket, order, service, domain and client events with the key details, a link back to WHMCS, per-chat duplicate prevention, a server-side diagnostics panel and a size-capped error log. Failed sends never interrupt WHMCS.",
     "features": [
-      "🚫 ZERO Duplicate Messages",
-      "📊 Comprehensive Data Extraction",
-      "💼 Professional Formatting",
-      "🎯 Smart Detection System",
-      "⚡ Instant Delivery",
-      "🔧 Easy Configuration",
-      "🔒 Secure Admin Panel",
-      "📱 Multiple Message Formats",
-      "🎨 Custom Templates",
-      "📈 Debug & Monitoring",
-      "🧾 Invoice Items Breakdown",
-      "💬 Ticket Message Previews",
-      "📦 Complete Order Details"
+      "Invoice, ticket and order details from the WHMCS database",
+      "Professional, Detailed, Compact and Custom message formats",
+      "Per-chat duplicate prevention",
+      "Server-side diagnostics panel",
+      "Error log capped at 5 MB",
+      "Failed sends never interrupt WHMCS",
+      "Silent notifications and per-rule chat IDs"
     ]
   },
   "logo": {
@@ -43,10 +37,7 @@
     "telegram",
     "notifications",
     "whmcs",
-    "professional",
-    "comprehensive",
-    "integration",
-    "pro"
+    "integration"
   ],
   "require": {
     "php": ">=7.4",

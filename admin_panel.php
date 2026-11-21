@@ -1,372 +1,469 @@
 <?php
 /**
- * WHMCS Telegram Pro - Secure Admin Panel
- * Restricted to WHMCS admin users only
+ * WHMCS Telegram Pro - Diagnostics Panel
+ *
+ * Admin-only page that tests delivery FROM THIS SERVER using the module's own code,
+ * checks the server environment, and shows the plugin log.
  *
  * @author RAQEEB AL-NAQEEB - AL-NAKIB LTD DEV TEAM
- * @version 4.1.0
+ * @version 4.2.2
  */
 
-// Include WHMCS init file
 require_once __DIR__ . '/../../../init.php';
 
-// Check if WHMCS is loaded
 if (!defined('WHMCS')) {
-    header('HTTP/1.0 403 Forbidden');
-    die('Access denied. This file must be accessed through WHMCS.');
+    http_response_code(403);
+    exit('Access denied.');
 }
 
-// Check if user is logged in as admin
-if (!isset($_SESSION['adminid']) || empty($_SESSION['adminid'])) {
-    header('HTTP/1.0 401 Unauthorized');
-    die('Access denied. Admin login required. Please log in to WHMCS admin area first.');
-}
-
-// Additional admin verification using WHMCS authentication
 use WHMCS\Authentication\CurrentUser;
+use WHMCS\Database\Capsule;
+use WHMCS\Module\Notification\WHMCSTelegramPro\WHMCSTelegramPro;
+
+// ---------------------------------------------------------------------
+// Access control
+// ---------------------------------------------------------------------
+
+if (empty($_SESSION['adminid'])) {
+    http_response_code(401);
+    exit('Access denied. Please log in to the WHMCS admin area first.');
+}
+
+// Every check below fails closed: if WHMCS cannot confirm the admin, the page is not shown.
+$adminName = 'Admin #' . (int) $_SESSION['adminid'];
 try {
     $currentUser = new CurrentUser();
-    if (!$currentUser->admin() || !$currentUser->isAuthenticatedAdmin()) {
-        header('HTTP/1.0 403 Forbidden');
-        die('Access denied. Admin privileges required.');
+    $admin = $currentUser->admin();
+    $authenticated = $admin && $currentUser->isAuthenticatedAdmin();
+} catch (\Throwable $e) {
+    $authenticated = false;
+}
+if (!$authenticated) {
+    http_response_code(403);
+    exit('Access denied. Could not verify your WHMCS admin session. Log in to the admin area again.');
+}
+if (!empty($admin->username)) {
+    $adminName = (string) $admin->username;
+}
+
+// checkPermission() lives in the admin function library, which init.php only loads for admin
+// pages. Load it so the permission check below actually runs on this standalone page.
+if (!function_exists('checkPermission') && defined('ROOTDIR') && is_file(ROOTDIR . '/includes/adminfunctions.php')) {
+    require_once ROOTDIR . '/includes/adminfunctions.php';
+}
+
+// Any one of these permissions grants access. checkPermission() runs in no-redirect mode so a
+// permission name that a WHMCS version does not have cannot redirect; the others still apply.
+$allowed = false;
+if (function_exists('checkPermission')) {
+    foreach (['Configure General Settings', 'Configure Addon Modules', 'Configure Notifications'] as $permission) {
+        try {
+            if (checkPermission($permission, true)) {
+                $allowed = true;
+                break;
+            }
+        } catch (\Throwable $e) {
+            // Unknown permission name in this WHMCS version: try the next one
+        }
     }
-} catch (Exception $e) {
-    // Fallback to session check if CurrentUser fails
-    if (!isset($_SESSION['adminid']) || !isset($_SESSION['adminusername'])) {
-        header('HTTP/1.0 403 Forbidden');
-        die('Authentication error. Please log in to WHMCS admin area.');
+}
+if (!$allowed) {
+    http_response_code(403);
+    exit('Access denied. Your admin role needs the "Configure General Settings" permission.');
+}
+
+// WHMCS may already have loaded the module class (for example through its own autoloader)
+if (!class_exists(WHMCSTelegramPro::class, false)) {
+    require_once __DIR__ . '/WHMCSTelegramPro.php';
+}
+
+header('Cache-Control: no-store');
+header('X-Frame-Options: SAMEORIGIN');
+header('X-Content-Type-Options: nosniff');
+header('Referrer-Policy: no-referrer');
+header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'self'");
+
+if (empty($_SESSION['tgpro_csrf'])) {
+    $_SESSION['tgpro_csrf'] = bin2hex(random_bytes(32));
+}
+$csrf = $_SESSION['tgpro_csrf'];
+
+function tgpro_h($value)
+{
+    return htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+/**
+ * Provider settings saved in WHMCS, if they can be read. The storage format is not documented,
+ * so this tries plain JSON and then WHMCS decrypt(), and returns [] when neither works.
+ */
+function tgpro_saved_settings()
+{
+    try {
+        $raw = Capsule::table('tblnotificationproviders')->where('name', 'WHMCSTelegramPro')->value('settings');
+        if (!is_string($raw) || $raw === '') {
+            return [];
+        }
+        $settings = json_decode($raw, true);
+        if (!is_array($settings) && function_exists('decrypt')) {
+            $settings = json_decode((string) decrypt($raw), true);
+        }
+        if (!is_array($settings)) {
+            return [];
+        }
+
+        // Password fields may be encrypted individually inside the settings. Keep the token only
+        // when it (or its decrypted form) looks like a real bot token.
+        $token = trim((string) ($settings['bot_token'] ?? ''));
+        if ($token !== '' && !tgpro_looks_like_token($token) && function_exists('decrypt')) {
+            $token = trim((string) decrypt($token));
+        }
+        $settings['bot_token'] = tgpro_looks_like_token($token) ? $token : '';
+        return $settings;
+    } catch (\Throwable $e) {
+        return [];
     }
 }
 
-// Check admin permissions for addon configuration (if function exists)
-if (function_exists('checkPermission') && !checkPermission('Configure Addons')) {
-    header('HTTP/1.0 403 Forbidden');
-    die('Access denied. You need "Configure Addons" permission to access this panel.');
+function tgpro_looks_like_token($token)
+{
+    return (bool) preg_match('/^\d{5,}:[A-Za-z0-9_-]{30,}$/', (string) $token);
 }
 
-// Log admin access for security audit (if function exists)
-if (function_exists('logActivity')) {
-    logActivity("Admin {$_SESSION['adminusername']} accessed WHMCS Telegram Pro admin panel");
+/**
+ * Plain HTTPS request to api.telegram.org (no bot token) to show whether this server can reach Telegram
+ */
+function tgpro_network_check()
+{
+    $result = ['dns' => '', 'https' => '', 'ok' => false];
+
+    $ip = gethostbyname('api.telegram.org');
+    if ($ip === 'api.telegram.org' && function_exists('dns_get_record')) {
+        // gethostbyname() only knows IPv4; an IPv6-only server can still resolve the name
+        $records = @dns_get_record('api.telegram.org', DNS_AAAA);
+        if (!empty($records[0]['ipv6'])) {
+            $ip = $records[0]['ipv6'];
+        }
+    }
+    $result['dns'] = $ip !== 'api.telegram.org' ? 'Resolved to ' . $ip : 'FAILED: api.telegram.org does not resolve on this server';
+
+    $start = microtime(true);
+    if (function_exists('curl_init') && function_exists('curl_exec')) {
+        $ch = curl_init('https://api.telegram.org/');
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_NOBODY => true,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT => 10,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+        ]);
+        $ok = curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        $errno = curl_errno($ch);
+        if (PHP_VERSION_ID < 80000) {
+            curl_close($ch); // no-op since PHP 8.0, deprecated in 8.5
+        }
+        $time = round(microtime(true) - $start, 2);
+
+        if ($ok === false) {
+            $result['https'] = 'FAILED (cURL ' . $errno . '): ' . $error . ' after ' . $time . 's';
+            $result['hint'] = tgpro_curl_hint($errno);
+        } else {
+            $result['https'] = 'Connected: HTTP ' . $code . ' in ' . $time . 's';
+            $result['ok'] = true;
+        }
+    } elseif (!extension_loaded('openssl')) {
+        $result['https'] = 'FAILED: PHP has no usable cURL extension and no OpenSSL extension, so it cannot make HTTPS requests';
+    } elseif (filter_var(ini_get('allow_url_fopen'), FILTER_VALIDATE_BOOLEAN)) {
+        error_clear_last();
+        $context = stream_context_create(['http' => ['method' => 'HEAD', 'timeout' => 10, 'ignore_errors' => true]]);
+        $raw = @file_get_contents('https://api.telegram.org/', false, $context);
+        $time = round(microtime(true) - $start, 2);
+        if ($raw === false) {
+            $last = error_get_last();
+            $result['https'] = 'FAILED: ' . ($last ? $last['message'] : 'could not connect') . ' after ' . $time . 's';
+        } else {
+            $result['https'] = 'Connected in ' . $time . 's';
+            $result['ok'] = true;
+        }
+    } else {
+        $result['https'] = 'FAILED: PHP has neither a usable cURL extension nor allow_url_fopen enabled';
+    }
+
+    return $result;
 }
+
+/**
+ * What a cURL error number usually means for a request to api.telegram.org
+ */
+function tgpro_curl_hint($errno)
+{
+    switch ((int) $errno) {
+        case 5:
+        case 6:
+            return 'The server cannot resolve the name. Check the DNS resolvers in /etc/resolv.conf.';
+        case 7:
+            return 'The connection was refused or blocked. Check the server firewall and aaPanel security rules for outbound port 443.';
+        case 28:
+            return 'The connection timed out. Outbound traffic to Telegram is most likely dropped by a firewall or blocked by the hosting provider or network.';
+        case 35:
+        case 60:
+        case 77:
+            return 'The TLS handshake or certificate check failed. Update the server CA certificates (ca-certificates package) and check for an intercepting proxy.';
+        default:
+            return '';
+    }
+}
+
+/**
+ * Last lines of the plugin log, read from the end of the file so a 5 MB log stays cheap to show
+ */
+function tgpro_log_tail($file, $lines = 100)
+{
+    if (!is_file($file) || !is_readable($file)) {
+        return [];
+    }
+    $size = filesize($file);
+    $fp = fopen($file, 'rb');
+    if (!$fp) {
+        return [];
+    }
+    fseek($fp, max(0, $size - 65536));
+    $data = (string) stream_get_contents($fp);
+    fclose($fp);
+
+    $rows = explode("\n", str_replace(WHMCSTelegramPro::LOG_HEADER, '', $data));
+    if ($size > 65536) {
+        array_shift($rows); // first line is probably partial
+    }
+    $rows = array_values(array_filter($rows, 'strlen'));
+    return array_slice($rows, -$lines);
+}
+
+// ---------------------------------------------------------------------
+// Actions (POST only, CSRF protected)
+// ---------------------------------------------------------------------
+
+$saved = tgpro_saved_settings();
+$savedToken = trim((string) ($saved['bot_token'] ?? ''));
+$savedChat = trim((string) ($saved['default_chat_id'] ?? ''));
+
+$notice = null;       // ['ok' => bool, 'text' => string]
+$network = null;
+$chatInput = $savedChat;
+$logFile = WHMCSTelegramPro::logFile();
+
+// Results of the last action, carried across the redirect below (post/redirect/get), so
+// refreshing the page never repeats an action such as sending a test message
+if (!empty($_SESSION['tgpro_flash']) && is_array($_SESSION['tgpro_flash'])) {
+    $flash = $_SESSION['tgpro_flash'];
+    unset($_SESSION['tgpro_flash']);
+    $notice = $flash['notice'] ?? null;
+    $network = $flash['network'] ?? null;
+    if (isset($flash['chat'])) {
+        $chatInput = (string) $flash['chat'];
+    }
+}
+
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+    if (!hash_equals($csrf, (string) ($_POST['csrf'] ?? ''))) {
+        $notice = ['ok' => false, 'text' => 'The form expired. Reload the page and try again.'];
+    } else {
+        $action = (string) ($_POST['action'] ?? '');
+
+        if ($action === 'test') {
+            $token = trim((string) ($_POST['bot_token'] ?? ''));
+            $chatInput = trim((string) ($_POST['chat_id'] ?? ''));
+            if ($token === '' && $savedToken !== '') {
+                $token = $savedToken;
+            }
+            try {
+                $module = new WHMCSTelegramPro();
+                $result = $module->testConnection(['bot_token' => $token, 'default_chat_id' => $chatInput]);
+                $notice = ['ok' => true, 'text' => 'Success from this server: ' . ($result['message'] ?? '')
+                    . ($chatInput === '' ? ' (token checked; enter a chat ID to also send a message)' : '')];
+            } catch (\Throwable $e) {
+                $notice = ['ok' => false, 'text' => $e->getMessage()];
+            }
+            if (function_exists('logActivity')) {
+                logActivity('WHMCS Telegram Pro: delivery test by ' . $adminName . ' - ' . ($notice['ok'] ? 'success' : 'failed'));
+            }
+        } elseif ($action === 'network') {
+            $network = tgpro_network_check();
+        } elseif ($action === 'clear_log') {
+            if (is_file($logFile) && @file_put_contents($logFile, WHMCSTelegramPro::LOG_HEADER, LOCK_EX) === false) {
+                $notice = ['ok' => false, 'text' => 'Could not clear the log (file not writable).'];
+            } else {
+                $notice = ['ok' => true, 'text' => 'Plugin log cleared.'];
+                if (function_exists('logActivity')) {
+                    logActivity('WHMCS Telegram Pro: plugin log cleared by ' . $adminName);
+                }
+            }
+        }
+    }
+
+    $_SESSION['tgpro_flash'] = ['notice' => $notice, 'network' => $network, 'chat' => $chatInput];
+    header('Location: admin_panel.php', true, 303);
+    exit;
+}
+
+// ---------------------------------------------------------------------
+// Environment checks (cheap, run on every load)
+// ---------------------------------------------------------------------
+
+$checks = [];
+
+$whmcsVersion = '';
+try {
+    $whmcsVersion = (string) Capsule::table('tblconfiguration')->where('setting', 'Version')->value('value');
+} catch (\Throwable $e) {
+}
+$checks[] = ['WHMCS version', $whmcsVersion !== '' ? $whmcsVersion : 'Unknown', null];
+$checks[] = ['Module version', WHMCSTelegramPro::VERSION, null];
+$checks[] = ['PHP version', PHP_VERSION, version_compare(PHP_VERSION, '7.4.0', '>=')];
+
+$curlUsable = function_exists('curl_init') && function_exists('curl_exec');
+if ($curlUsable && function_exists('curl_version')) {
+    $curl = curl_version();
+    $checks[] = ['cURL', 'Enabled (' . ($curl['version'] ?? '?') . ', ' . ($curl['ssl_version'] ?? 'no SSL') . ')', true];
+} elseif (function_exists('curl_init')) {
+    $checks[] = ['cURL', 'Installed but curl_exec is disabled (falls back to allow_url_fopen)', null];
+} else {
+    $checks[] = ['cURL', 'Not installed (falls back to allow_url_fopen)', null];
+}
+$fopen = filter_var(ini_get('allow_url_fopen'), FILTER_VALIDATE_BOOLEAN);
+$checks[] = ['allow_url_fopen', $fopen ? 'On' : 'Off', $curlUsable ? null : $fopen];
+$checks[] = ['OpenSSL', extension_loaded('openssl') ? 'Enabled' : 'Missing', extension_loaded('openssl')];
+$checks[] = ['mbstring', extension_loaded('mbstring') ? 'Enabled' : 'Not installed (optional)', null];
+
+$logDir = dirname($logFile);
+$logWritable = is_dir($logDir) ? is_writable($logDir) : is_writable(__DIR__);
+$logSize = is_file($logFile) ? filesize($logFile) : 0;
+$checks[] = ['Plugin log', ($logWritable ? 'Writable' : 'NOT writable') . ', ' . round($logSize / 1048576, 2) . ' MB of 5 MB', $logWritable];
+
+try {
+    $table = Capsule::schema()->hasTable(WHMCSTelegramPro::DEDUP_TABLE);
+    $checks[] = ['Duplicate prevention table', $table ? 'Present' : 'Created on first notification', $table ? true : null];
+} catch (\Throwable $e) {
+    $checks[] = ['Duplicate prevention table', 'Could not check: ' . $e->getMessage(), false];
+}
+
+$checks[] = ['Saved provider settings', $savedToken !== '' ? 'Found (token will be used if the field below is left empty)' : 'Not readable here; enter the token below', null];
+
+$logLines = tgpro_log_tail($logFile);
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WHMCS Telegram Pro - Admin Panel</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <style>
-        body {
-            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
-        .main-container {
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-        .header-card {
-            background: white;
-            border-radius: 15px;
-            padding: 30px;
-            text-align: center;
-            margin-bottom: 30px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-        }
-        .test-card {
-            background: white;
-            border-radius: 15px;
-            padding: 30px;
-            margin-bottom: 20px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-        }
-        .btn-success-custom {
-            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-            border: none;
-            color: white;
-            font-weight: bold;
-            border-radius: 25px;
-            padding: 12px 30px;
-            transition: all 0.3s ease;
-        }
-        .btn-success-custom:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(40, 167, 69, 0.4);
-            color: white;
-        }
-        .result-box {
-            margin-top: 20px;
-            padding: 15px;
-            border-radius: 8px;
-            display: none;
-        }
-        .result-success {
-            background: #d4edda;
-            border: 1px solid #c3e6cb;
-            color: #155724;
-        }
-        .result-error {
-            background: #f8d7da;
-            border: 1px solid #f5c6cb;
-            color: #721c24;
-        }
-        .admin-info {
-            background: #e3f2fd;
-            border: 1px solid #90caf9;
-            color: #1565c0;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WHMCS Telegram Pro - Diagnostics</title>
+<style>
+    body { font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; background: #f4f6f8; color: #1f2933; margin: 0; padding: 24px; }
+    .wrap { max-width: 980px; margin: 0 auto; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    h2 { font-size: 16px; margin: 0 0 12px; }
+    .muted { color: #616e7c; font-size: 13px; }
+    .card { background: #fff; border: 1px solid #d9e2ec; border-radius: 6px; padding: 18px 20px; margin: 16px 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    td { padding: 7px 8px; border-top: 1px solid #edf0f3; vertical-align: top; }
+    td:first-child { width: 230px; color: #52606d; }
+    .ok { color: #1b7f3b; font-weight: 600; }
+    .bad { color: #b42318; font-weight: 600; }
+    .notice { padding: 12px 14px; border-radius: 6px; margin: 16px 0; font-size: 14px; }
+    .notice.ok { background: #e6f4ea; border: 1px solid #b7dfc1; color: #1b5e20; font-weight: normal; }
+    .notice.bad { background: #fdecea; border: 1px solid #f5c2c0; color: #8a1c1c; font-weight: normal; }
+    label { display: block; font-size: 13px; color: #52606d; margin: 10px 0 4px; }
+    input[type=text], input[type=password] { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #bcccdc; border-radius: 4px; font-size: 14px; }
+    button { margin-top: 12px; padding: 8px 16px; border: 0; border-radius: 4px; background: #2563eb; color: #fff; font-size: 14px; cursor: pointer; }
+    button.secondary { background: #52606d; }
+    button.danger { background: #b42318; }
+    pre { background: #1f2933; color: #e4e7eb; padding: 12px; border-radius: 4px; font-size: 12px; line-height: 1.5; max-height: 420px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+    form.inline { display: inline; }
+</style>
 </head>
 <body>
-    <div class="main-container">
-        <!-- Admin Info -->
-        <div class="admin-info">
-            <h6><i class="fas fa-user-shield"></i> Admin Access - Secure Panel</h6>
-            <p class="mb-0">
-                <strong>Logged in as:</strong> <?php echo htmlspecialchars($_SESSION['adminusername']); ?> |
-                <strong>Session ID:</strong> <?php echo substr($_SESSION['adminid'], 0, 8); ?>*** |
-                <strong>Access Time:</strong> <?php echo date('Y-m-d H:i:s'); ?>
-            </p>
-        </div>
+<div class="wrap">
+    <h1>WHMCS Telegram Pro - Diagnostics</h1>
+    <div class="muted">Signed in as <?php echo tgpro_h($adminName); ?>. Every test on this page runs on this server, the same way real notifications are sent.</div>
 
-        <!-- Header -->
-        <div class="header-card">
-            <h1><i class="fas fa-check-circle text-success"></i> WHMCS Telegram Pro</h1>
-            <p class="lead mb-0">Secure Admin Panel - Real WHMCS Integration v4.1.0</p>
-        </div>
+    <?php if ($notice) { ?>
+        <div class="notice <?php echo $notice['ok'] ? 'ok' : 'bad'; ?>"><?php echo tgpro_h($notice['text']); ?></div>
+    <?php } ?>
 
-        <div class="row">
-            <!-- Bot Testing -->
-            <div class="col-md-6">
-                <div class="test-card">
-                    <h4><i class="fas fa-robot text-success"></i> Bot Token Test</h4>
-                    <p>Test your Telegram bot configuration.</p>
-
-                    <div class="mb-3">
-                        <label class="form-label">Bot Token</label>
-                        <input type="password" id="bot_token" class="form-control"
-                               placeholder="1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ">
-                    </div>
-
-                    <button onclick="testBot()" class="btn btn-success-custom">
-                        <i class="fas fa-check"></i> Test Bot
-                    </button>
-
-                    <div id="bot_result" class="result-box"></div>
-                </div>
-            </div>
-
-            <!-- Message Testing -->
-            <div class="col-md-6">
-                <div class="test-card">
-                    <h4><i class="fas fa-paper-plane text-info"></i> Send Test Message</h4>
-                    <p>Send a test notification message.</p>
-
-                    <div class="mb-3">
-                        <label class="form-label">Bot Token</label>
-                        <input type="password" id="msg_token" class="form-control">
-                    </div>
-
-                    <div class="mb-3">
-                        <label class="form-label">Chat ID</label>
-                        <input type="text" id="chat_id" class="form-control"
-                               placeholder="-1001234567890">
-                    </div>
-
-                    <div class="mb-3">
-                        <label class="form-label">Test Message</label>
-                        <textarea id="test_message" class="form-control" rows="3">✅ <b>WHMCS Telegram Pro - Test Message</b>
-
-Your Telegram configuration is working perfectly!
-
-📅 Tested by: <?php echo htmlspecialchars($_SESSION['adminusername']); ?> at <?php echo date('Y-m-d H:i:s'); ?></textarea>
-                    </div>
-
-                    <button onclick="sendTest()" class="btn btn-success-custom">
-                        <i class="fas fa-paper-plane"></i> Send Test
-                    </button>
-
-                    <div id="msg_result" class="result-box"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- WHMCS Integration Guide -->
-        <div class="test-card">
-            <h4><i class="fas fa-cogs text-primary"></i> WHMCS Integration Setup</h4>
-
-            <div class="alert alert-success">
-                <h5><i class="fas fa-check-circle"></i> Step-by-Step Integration</h5>
-
-                <div class="row">
-                    <div class="col-md-6">
-                        <h6>1. Configure Provider</h6>
-                        <ol>
-                            <li>Go to <strong>Setup → Staff Management → Notification Providers</strong></li>
-                            <li>Find <strong>"WHMCS Telegram Pro"</strong></li>
-                            <li>Click <strong>"Settings"</strong></li>
-                            <li>Enter your bot token and default chat ID</li>
-                            <li>Click <strong>"Test Settings"</strong> to verify</li>
-                        </ol>
-                    </div>
-                    <div class="col-md-6">
-                        <h6>2. Create Notification Rules</h6>
-                        <ol>
-                            <li>Go to <strong>Setup → Notifications → Configure Notifications</strong></li>
-                            <li>Click <strong>"Create New Notification Rule"</strong></li>
-                            <li>Select <strong>"WHMCS Telegram Pro"</strong> as provider</li>
-                            <li>Choose events (Invoice Created, Ticket Opened, etc.)</li>
-                            <li>Configure message template and settings</li>
-                        </ol>
-                    </div>
-                </div>
-            </div>
-
-            <div class="alert alert-info">
-                <h6><i class="fas fa-info-circle"></i> Available WHMCS Events</h6>
-                <div class="row">
-                    <div class="col-md-4">
-                        <strong>Invoice Events:</strong>
-                        <ul>
-                            <li>Invoice Created</li>
-                            <li>Invoice Paid</li>
-                            <li>Invoice Cancelled</li>
-                            <li>Payment Reminder</li>
-                            <li>Overdue Notices</li>
-                        </ul>
-                    </div>
-                    <div class="col-md-4">
-                        <strong>Support Events:</strong>
-                        <ul>
-                            <li>Ticket Opened</li>
-                            <li>User Reply</li>
-                            <li>Admin Reply</li>
-                            <li>Ticket Closed</li>
-                        </ul>
-                    </div>
-                    <div class="col-md-4">
-                        <strong>Other Events:</strong>
-                        <ul>
-                            <li>Order Placed</li>
-                            <li>Service Events</li>
-                            <li>Domain Events</li>
-                            <li>Client Signup</li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Test WHMCS Events -->
-        <div class="test-card">
-            <h4><i class="fas fa-play text-warning"></i> Test WHMCS Events</h4>
-            <p>To test if real notifications work:</p>
-
-            <div class="alert alert-warning">
-                <strong>Testing Real Events:</strong>
-                <ol>
-                    <li>Complete the setup steps above</li>
-                    <li>Create a test invoice in WHMCS</li>
-                    <li>Mark the invoice as paid</li>
-                    <li>Open a support ticket</li>
-                    <li>Check your Telegram chat for notifications</li>
-                </ol>
-            </div>
-
-            <div class="alert alert-primary">
-                <strong>Debug Information:</strong>
-                <ul>
-                    <li>Enable "Debug Logging" in provider settings</li>
-                    <li>Check WHMCS Activity Log for notification attempts</li>
-                    <li>Look for "WHMCS Telegram Pro" entries in the logs</li>
-                </ul>
-            </div>
-        </div>
-
-        <!-- Security Notice -->
-        <div class="alert alert-danger">
-            <h6><i class="fas fa-shield-alt"></i> Security Notice</h6>
-            <p class="mb-0">
-                🔒 This admin panel is restricted to WHMCS administrators only.
-                All access attempts are logged for security purposes.
-                Do not share bot tokens or access credentials.
-                <strong>Admin Only Access: </strong> Verified at <?php echo date('Y-m-d H:i:s'); ?>
-            </p>
-        </div>
+    <div class="card">
+        <h2>Server environment</h2>
+        <table>
+            <?php foreach ($checks as $check) { ?>
+                <tr>
+                    <td><?php echo tgpro_h($check[0]); ?></td>
+                    <td class="<?php echo $check[2] === null ? '' : ($check[2] ? 'ok' : 'bad'); ?>"><?php echo tgpro_h($check[1]); ?></td>
+                </tr>
+            <?php } ?>
+        </table>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
-    <script>
-        function showResult(elementId, success, message) {
-            const element = document.getElementById(elementId);
-            element.className = success ? 'result-box result-success' : 'result-box result-error';
-            element.innerHTML = `<strong>${success ? '✅ Success' : '❌ Error'}:</strong> ${message}`;
-            element.style.display = 'block';
-        }
+    <div class="card">
+        <h2>Connection to Telegram</h2>
+        <div class="muted">Checks DNS and HTTPS from this server to api.telegram.org. No bot token is sent.</div>
+        <?php if ($network) { ?>
+            <table style="margin-top: 10px;">
+                <tr><td>DNS</td><td class="<?php echo strpos($network['dns'], 'FAILED') === 0 ? 'bad' : 'ok'; ?>"><?php echo tgpro_h($network['dns']); ?></td></tr>
+                <tr><td>HTTPS</td><td class="<?php echo $network['ok'] ? 'ok' : 'bad'; ?>"><?php echo tgpro_h($network['https']); ?></td></tr>
+            </table>
+            <?php if (!$network['ok']) { ?>
+                <?php if (!empty($network['hint'])) { ?>
+                    <p class="bad"><?php echo tgpro_h($network['hint']); ?></p>
+                <?php } ?>
+                <p class="muted">This server cannot reach Telegram. Check the server firewall and outbound HTTPS (port 443), ask your hosting provider whether Telegram is blocked in the data centre, and make sure PHP has cURL with OpenSSL.</p>
+            <?php } ?>
+        <?php } ?>
+        <form method="post">
+            <input type="hidden" name="csrf" value="<?php echo tgpro_h($csrf); ?>">
+            <input type="hidden" name="action" value="network">
+            <button type="submit" class="secondary">Check connection</button>
+        </form>
+    </div>
 
-        function testBot() {
-            const token = document.getElementById('bot_token').value;
+    <div class="card">
+        <h2>Send a test message</h2>
+        <div class="muted">Uses the module's own code path. Leave the token empty to use the saved provider settings when they are readable.</div>
+        <form method="post" autocomplete="off">
+            <input type="hidden" name="csrf" value="<?php echo tgpro_h($csrf); ?>">
+            <input type="hidden" name="action" value="test">
+            <label for="bot_token">Bot token</label>
+            <input type="password" id="bot_token" name="bot_token" placeholder="<?php echo $savedToken !== '' ? 'Saved token will be used' : '123456789:ABC...'; ?>">
+            <label for="chat_id">Chat ID (leave empty to only check the token)</label>
+            <input type="text" id="chat_id" name="chat_id" value="<?php echo tgpro_h($chatInput); ?>" placeholder="-1001234567890">
+            <button type="submit">Send test from this server</button>
+        </form>
+    </div>
 
-            if (!token) {
-                showResult('bot_result', false, 'Please enter a bot token');
-                return;
-            }
+    <div class="card">
+        <h2>Plugin log</h2>
+        <div class="muted"><?php echo tgpro_h('modules/notifications/WHMCSTelegramPro/logs/error_log.php'); ?> - last <?php echo count($logLines); ?> entries, newest at the bottom. The file never exceeds 5 MB.</div>
+        <?php if ($logLines) { ?>
+            <pre><?php echo tgpro_h(implode("\n", $logLines)); ?></pre>
+            <form method="post" class="inline">
+                <input type="hidden" name="csrf" value="<?php echo tgpro_h($csrf); ?>">
+                <input type="hidden" name="action" value="clear_log">
+                <button type="submit" class="danger">Clear log</button>
+            </form>
+        <?php } else { ?>
+            <p class="muted">No entries yet.</p>
+        <?php } ?>
+    </div>
 
-            fetch(`https://api.telegram.org/bot${token}/getMe`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.ok) {
-                        showResult('bot_result', true,
-                            `Bot is valid!<br>Username: @${data.result.username}<br>Name: ${data.result.first_name}`);
-                    } else {
-                        showResult('bot_result', false, data.description || 'Invalid token');
-                    }
-                })
-                .catch(error => {
-                    showResult('bot_result', false, 'Network error: ' + error.message);
-                });
-        }
-
-        function sendTest() {
-            const token = document.getElementById('msg_token').value;
-            const chatId = document.getElementById('chat_id').value;
-            const message = document.getElementById('test_message').value;
-
-            if (!token || !chatId || !message) {
-                showResult('msg_result', false, 'Please fill all fields');
-                return;
-            }
-
-            const url = `https://api.telegram.org/bot${token}/sendMessage`;
-            const data = {
-                chat_id: chatId,
-                text: message,
-                parse_mode: 'HTML'
-            };
-
-            fetch(url, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(data)
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.ok) {
-                    showResult('msg_result', true,
-                        `Message sent successfully!<br>Message ID: ${data.result.message_id}`);
-                } else {
-                    showResult('msg_result', false, data.description || 'Failed to send message');
-                }
-            })
-            .catch(error => {
-                showResult('msg_result', false, 'Network error: ' + error.message);
-            });
-        }
-    </script>
+    <div class="card">
+        <h2>Setup</h2>
+        <table>
+            <tr><td>1. Provider</td><td>Setup &gt; Staff Management &gt; Notification Providers &gt; WHMCS Telegram Pro: enter the bot token and default chat ID, then Test Settings.</td></tr>
+            <tr><td>2. Rules</td><td>Setup &gt; Notifications: create a rule, choose WHMCS Telegram Pro as the provider, pick events and a message format.</td></tr>
+            <tr><td>3. Troubleshooting</td><td>Enable Debug Logging in the provider settings temporarily, trigger an event, then read the plugin log above.</td></tr>
+        </table>
+    </div>
+</div>
 </body>
 </html>

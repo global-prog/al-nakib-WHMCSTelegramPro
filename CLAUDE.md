@@ -4,210 +4,93 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This is the WHMCS Telegram Pro module (WHMCSTelegramPro) that sends professional notifications from WHMCS to Telegram. It implements the WHMCS NotificationModuleInterface and provides zero-duplicate message delivery with rich data extraction from the WHMCS database.
+WHMCS Telegram Pro (v4.2.2) is a WHMCS **notification provider** module that forwards WHMCS notification-rule events (invoices, tickets, orders, services, domains, clients) to Telegram. Plain PHP, no build step, no Composer dependencies. Targets WHMCS 8.x and 9.0 (9.0 requires PHP 8.2+, 8.3 recommended) on PHP 7.4 through 8.3. Keep the code 7.4-compatible: no `match`, nullsafe `?->`, constructor promotion, `str_contains()` and similar.
 
-**Current Version**: 4.1.0
-**Status**: Production Ready
-**PHP**: 7.4+
-**WHMCS**: 8.0+
-**Developed By**: RAQEEB AL-NAQEEB - AL-NAKIB LTD DEV TEAM
+Deployment path: `<whmcs>/modules/notifications/WHMCSTelegramPro/`. WHMCS discovers the module by folder name, file name `WHMCSTelegramPro.php`, and class `WHMCS\Module\Notification\WHMCSTelegramPro\WHMCSTelegramPro`. All three must stay in sync.
 
-## Architecture
+## Owner rules
 
-### Core Components
+- **Plain ASCII only** in every shipped file and in message output: no emoji, em/en dashes, arrows, curly quotes, bullet characters or ellipsis characters. Use `-`, `>`, `|`, `...`. Check with `grep -nP '[^\x00-\x7F]' *.php *.md *.txt *.json *.svg`. (Currency symbols coming from the WHMCS database are data and may appear in messages.)
+- **No AI attribution** anywhere: no `Co-Authored-By` or "Generated with" lines in commits or PRs.
+- This CLAUDE.md is **not** shipped in the release zip.
 
-**WHMCSTelegramPro.php** (Main Module - 987 lines)
-- Implements `WHMCS\Module\Contracts\NotificationModuleInterface`
-- Namespace: `WHMCS\Module\Notification\WHMCSTelegramPro`
-- Entry point: `sendNotification()` method processes all notifications
-- Uses WHMCS Capsule (Illuminate Database) for all database operations
+## Workspace layout
 
-**admin_panel.php** (Admin Interface - 372 lines)
-- Secure admin-only web interface for testing bot configuration
-- Authentication: Requires WHMCS admin session and `CurrentUser` verification
-- Features: Bot token testing, test message sending, setup instructions
-- Access: `/modules/notifications/WHMCSTelegramPro/admin_panel.php`
+- This directory (`WHMCSTelegramPro/`) is the git repo (remote `global-prog/al-nakib-WHMCSTelegramPro`, branch `main`) and the canonical source.
+- The parent folder `X:\WHMCS-TelegramNotificationsPlugin\` is not under version control. It holds release zips and a stale older copy in `al-nakib-WHMCSTelegramPro-main/`. Don't edit that copy.
 
-**whmcs.json** (Module Metadata)
-- Defines module type, version, requirements, and features
-- Used by WHMCS marketplace and module system
+## Commands
 
-### Key Architecture Patterns
+No test suite, linter config, or build. Local checks:
 
-**Duplicate Prevention System**
-- Uses content-based hashing with `generateNotificationHash()`
-- Stores notification hashes in `tblconfiguration` table
-- Three prevention modes: strict (10min), medium (5min), light (2min)
-- Auto-cleanup of records older than 24 hours
-- Hash format: `alnakib_{md5_hash}_{YmdHi_timestamp}`
-
-**Data Extraction Pipeline**
-1. `extractAndEnrichData()` - Detects notification type from URL/title
-2. Type-specific extractors: `getInvoiceData()`, `getTicketData()`, `getOrderData()`
-3. Database joins to fetch related client, product, department data
-4. Returns enriched array with formatted display data
-
-**Message Generation**
-- Three built-in formats: professional, detailed, compact
-- Custom template support with variable substitution
-- HTML/Markdown parse mode support
-- Context-aware icons and status indicators
-- Auto-escaping with `htmlspecialchars()`
-
-**Retry Logic**
-- `sendWithRetry()` attempts delivery up to MAX_RETRIES (2) times
-- 1-second delay between retry attempts
-- Returns structured result array: `['success' => bool, 'error' => string, 'message_id' => int]`
-
-## Database Operations
-
-All database queries use **WHMCS Capsule** (Laravel Query Builder):
-
-```php
-use WHMCS\Database\Capsule;
-
-// Example query pattern used throughout
-$invoice = Capsule::table('tblinvoices')
-    ->leftJoin('tblclients', 'tblinvoices.userid', '=', 'tblclients.id')
-    ->where('tblinvoices.id', $invoiceId)
-    ->select([...])
-    ->first();
-```
-
-### Tables Used
-- `tblinvoices` - Invoice data with client joins
-- `tbltickets` - Ticket data with client/department joins
-- `tblticketreplies` - Reply history and admin assignment
-- `tblorders` - Order data with client joins
-- `tblorderitems` - Product/domain details for orders
-- `tblclients` - Client information (firstname, lastname, email, company)
-- `tblticketdepartments` - Department names
-- `tbladmins` - Admin names for ticket assignments
-- `tblconfiguration` - Duplicate prevention storage (non-standard usage)
-
-## Configuration
-
-### Module Settings (settings() method)
-- `bot_token` - Required, password field, Telegram bot API token
-- `default_chat_id` - Optional, fallback chat ID for notifications
-- `parse_mode` - Dropdown: HTML (default) or Markdown
-- `enable_debug` - Yes/No, logs to WHMCS activity log
-- `duplicate_prevention` - Dropdown: strict/medium/light/off
-
-### Per-Rule Settings (notificationSettings() method)
-- `chat_id` - Overrides default_chat_id for specific rules
-- `use_professional_format` - professional/detailed/compact/custom
-- `message_template` - Custom template when format is 'custom'
-- `include_url` - Yes/No, add direct WHMCS link
-- `silent_notification` - Yes/No, disable notification sound
-
-## Development Commands
-
-### Testing
-There is no automated test suite. Testing is done manually:
-
-1. **Test Bot Connection**:
-   - Navigate to Setup → Staff Management → Notification Providers
-   - Click "Configure" on "WHMCS Telegram Pro"
-   - Use "Test Settings" button
-   - OR use admin panel at `/modules/notifications/WHMCSTelegramPro/admin_panel.php`
-
-2. **Test Live Notifications**:
-   - Create notification rule in Setup → Notifications
-   - Trigger real WHMCS event (create invoice, ticket, etc.)
-   - Check Telegram for message delivery
-   - Review WHMCS Activity Log if debug mode enabled
-
-3. **Debug Mode**:
-   - Enable "Debug Logging" in provider settings
-   - Check WHMCS Activity Log for entries starting with "WHMCS Telegram Pro v4.1.0"
-   - All debug entries include JSON-encoded data arrays
-
-### Deployment
-
-**Installation Path**: `/modules/notifications/WHMCSTelegramPro/`
-
-**File Permissions**:
 ```bash
-chmod 755 /path/to/whmcs/modules/notifications/WHMCSTelegramPro
-chmod 644 /path/to/whmcs/modules/notifications/WHMCSTelegramPro/*.php
+php -l WHMCSTelegramPro.php
+php -l admin_panel.php
 ```
 
-**Pre-Deployment Checklist**: See PRODUCTION_CHECKLIST.md for comprehensive security, performance, and configuration validation steps.
+Offline logic testing works with a scratch harness that:
+- defines `WHMCS`;
+- stubs `WHMCS\Module\Contracts\NotificationModuleInterface`, `WHMCS\Notification\Contracts\NotificationInterface` and `WHMCS\Module\Notification\DescriptionTrait` (its setters must `return $this`);
+- stubs `WHMCS\Database\Capsule` with a chainable fake (`table()`, `where()` ... return `$this`; `first()`, `get()`, `value()`, `exists()`, `insertGetId()`, `delete()` return canned data);
+- then calls private methods via `ReflectionMethod`.
 
-**Post-Deployment**:
-1. Configure provider in WHMCS admin
-2. Test connection using built-in test
-3. Set debug mode to "No" for production
-4. Configure notification rules for desired events
-5. Test with real events
+`admin_panel.php` can be tested the same way: put a copy under a fake root (`root/modules/notifications/WHMCSTelegramPro/`) with a stub `root/init.php` that defines `WHMCS`, `$_SESSION`, `CurrentUser`, `Capsule`, `checkPermission()` and `logActivity()`, then run the panel with the PHP CLI.
 
-## Important Implementation Details
+Run everything with `php -d error_reporting=E_ALL` to catch PHP 8.x deprecations. The local PHP (`C:\tools\php83`) loads no `mbstring`/`curl`/`openssl` by default, which is why the code has mbstring-free `textLength()`/`textCut()` helpers. To exercise the cURL path, add `-d extension_dir=C:/tools/php83/ext -d extension=curl -d extension=openssl -d extension=mbstring`. This machine's network re-signs TLS, so live API calls also need `-d curl.cainfo=<PEM exported from the Windows root store>`, at a path without `~`. Never disable verification in the module. Point harnesses at a *copy* of the module, or they will create `logs/` inside the repo.
 
-### Notification Type Detection
-The module detects notification types using multiple strategies in order:
-1. URL regex matching: `/invoices.*id=(\d+)/`, `/supporttickets.*id=(\d+)/`, etc.
-2. Title regex matching: `/Invoice #(\d+)/`, `/#([A-Z]+-\d+)/` (ticket mask)
-3. Attributes fallback: `$attributes['invoiceid']`, `$attributes['ticketid']`, etc.
+Real testing needs a live WHMCS install: open `admin_panel.php` (diagnostics), then Setup > Staff Management > Notification Providers > WHMCS Telegram Pro > Test Settings, then create a rule under Setup > Notifications and trigger an event.
 
-### Security Features
-- WHMCS init check: `if (!defined("WHMCS")) die()`
-- Admin panel authentication via `CurrentUser::isAuthenticatedAdmin()`
-- Bot token stored as password field (masked in UI)
-- Input sanitization with `htmlspecialchars()` and `strip_tags()`
-- SSL verification enabled for Telegram API calls
-- Admin access logged via `logActivity()`
+Build the release zip from the parent directory with forward-slash paths (PowerShell 5.1 `Compress-Archive` writes backslashes, which break on Linux). Ship only `*.php`, `*.svg`, `*.json`, `*.txt` and `README.md` / `PRODUCTION_CHECKLIST.md`, **not** `CLAUDE.md`, `.git`, `.claude`, `.gitignore` or `logs/`. The command `zip` is not installed here; use Python's `zipfile` (`C:/Program Files/Python313/python.exe`, not the `python3` store stub, which hangs).
 
-### Telegram API Integration
-- API Base: `https://api.telegram.org/bot{TOKEN}/`
-- Methods used: `getMe` (test), `sendMessage` (notifications)
-- Uses PHP `file_get_contents()` with `stream_context_create()`
-- Timeout: 30 seconds (DEFAULT_TIMEOUT constant)
-- No external dependencies (cURL not required)
+**Version bumps:** update `VERSION` and the docblock in `WHMCSTelegramPro.php`, `whmcs.json`, the `admin_panel.php` docblock, README.md (header and history), INSTALL.txt (two places), PRODUCTION_CHECKLIST.md (title), and this file.
 
-### Message Length Handling
-- Telegram limit: 4096 characters
-- Module truncates messages automatically if exceeded
-- Priority given to title, client info, amount, status
+## WHMCS contract facts (verified against developers.whmcs.com)
 
-### Rate Limiting
-The code references rate limiting (RATE_LIMIT_DEFAULT = 15) but the actual implementation is not present in WHMCSTelegramPro.php. The constant exists but is not actively used in the notification flow.
+- `getAttributes()` returns **objects** with `getLabel()`, `getValue()`, `getUrl()`, `getStyle()` and `getIcon()`. It is not an associative array. `getAttributeList()` normalises them.
+- The docs say `sendNotification()` should throw on failure. On the owner's live install a thrown exception aborted the admin action that triggered it (a ticket reply showed WHMCS's "Oops! Something went wrong" page). So `sendNotification()` catches `\Throwable`, records it with `logError()` (always on) and returns. The catch body is itself wrapped in a `try` and `logError()` guards `logActivity()`, because logging can fail too (dropped DB connection). **Nothing may escape `sendNotification()`; do not reintroduce a throw.**
+- `getDynamicField()` returns `['values' => [...]]`.
+- Setting types: text, password, yesno, dropdown, radio, textarea, dynamic. A checked `yesno` is saved as `on`, so always test it through `isEnabled()`, never with `=== 'yes'`.
 
-## Common Modification Scenarios
+## Architecture (`WHMCSTelegramPro.php`, one class)
 
-### Adding New Notification Type
-1. Add type detection logic in `extractAndEnrichData()` using URL/title regex
-2. Create new `getXxxData($id)` method following pattern of `getInvoiceData()`
-3. Add database queries using Capsule with appropriate joins
-4. Return enriched data array with 'type', 'client', 'amount', 'status', 'details'
-5. Add icon in `getTypeIcon()` and action text in `getActionText()`
+`sendNotification()` pipeline:
 
-### Modifying Message Format
-1. Edit format methods: `generateProfessionalFormat()`, `generateDetailedFormat()`, `generateCompactFormat()`
-2. Use `htmlspecialchars()` for all user data to prevent XSS
-3. Respect `$includeUrl` parameter for link inclusion
-4. Use icon helper methods: `getTypeIcon()`, `getStatusIcon()`, `getPriorityIcon()`
+1. `getChatId()` (per-rule `chat_id` overrides `default_chat_id`), then `validateCredentials()` rejects malformed tokens and chat IDs with an actionable message.
+2. `detectEntity()`: finds the type and ID by matching `invoices.php`, `supporttickets.php`, `orders.php`, `clientsservices.php`, `clientsdomains.php` or `clientssummary.php` against the notification URL, then attribute URLs. The title fallback (`Invoice #`, `Order #`, `Ticket #`) yields a display number (`lookup`), not a row ID.
+3. `extractAndEnrichData()` (see step 5) runs **before** the dedup claim, because the ticket hash needs the latest reply ID.
+4. **Dedup:** hash of chat ID, entity, title and first 100 characters of the message, plus `last_reply_id` for tickets (two different replies can carry identical WHMCS text; a repeated copy of one event has the same DB state, so it still hashes the same). Stored in `mod_whmcstelegrampro_sent` (created lazily by `ensureDedupTable()`, which also removes pre-4.2 `alnakib_%` rows from `tblconfiguration`). `claimNotification()` claims the hash *before* sending: after a cheap `exists()` pre-check it inserts its own row, then re-checks for an earlier row with the same hash inside the window (`id < own id`) and backs off (releasing its row) if one exists. Of two requests handling the same event at the same moment, exactly one sends; the pre-check alone would let both through, so keep the post-insert re-check. A successful claim also prunes rows older than 24 h (in its own try, so a cleanup failure keeps the claim). The `catch` block calls `releaseClaim()` when the send did not succeed. Dedup **fails open**: if the table can't be created or queried, the message is sent rather than dropped; a row already inserted before the failure is still returned so it gets released. Window: strict 10 min, medium 5, light 2; `off` writes no rows. `ensureDedupTable()` treats a concurrent "table already exists" as success.
+5. `extractAndEnrichData()`: `getInvoiceData()`, `getTicketData()` or `getOrderData()`; other types use only the WHMCS attributes. **Every sub-query has its own try/catch that calls `logDebug`**, so one bad column can't blank the whole message. **All catches in the module take `\Throwable`, not `\Exception`**: a PHP 8 `TypeError`/`Error` from unexpected data must degrade a detail, not cancel the notification. Schema notes:
+   - order contents come from `tblhosting`, `tbldomains` and `tblhostingaddons` by `orderid` (there is no order-items table); the order's invoice is `tblorders.invoiceid`;
+   - `tbltickets.tid` is the public ticket number (`c` is an access key); `tbltickets.flag` is the assigned admin ID; `tbltickets.service` looks like `S<id>` or `D<id>`;
+   - ticket staff replies are detected via `Capsule::schema()->hasColumn()` on `tblticketreplies.admin`/`adminid`; the latest reply is fetched regardless, and when neither column exists its author is left empty (shown as "Latest message:");
+   - `tblorders.nameservers` is comma-separated; promo types are Percentage, Fixed Amount, Price Override, Free Setup;
+   - currency format (`tblcurrencies.format`, 1 to 4) is read in a separate cached query (`currencyFormat()`) so a schema difference can only affect formatting.
+6. **Format:** `generateProfessionalMessage()` dispatches to professional (default), detailed, compact, or custom (`processCustomTemplate()`: one `preg_replace_callback` pass, so inserted values are never re-scanned). Output is **always Telegram HTML**. Every format uses `headline()` (generic text for a blank title), and a result with no visible text (`plainText()` empty, e.g. a custom template whose placeholders are all empty) falls back to the professional format, because Telegram rejects empty messages.
+   - Professional layout, blocks separated by blank lines: bold headline plus `summaryLine()`; the WHMCS message unless `repeatsTitle()` (Unicode aware) says it only repeats the headline or `repeatsLatestMessage()` says it is the ticket text shown below; key facts from `invoiceLines()` / `ticketLines()` / `orderLines()` or the attribute list; the item list (`itemList()`, max 15) or the ticket's latest message in a `<blockquote>`; the action link.
+   - `link()` only creates links for absolute http(s) URLs (`isHttpUrl()`); relative attribute URLs are resolved with `absoluteUrl()` against `adminBaseUrl()`.
+   - Escape with `e()` (null-safe). `limitLength()` measures with `telegramLength()` (UTF-16 units, as Telegram counts; characters outside the BMP count 2), cuts at a line break past 4000, and re-closes a `<blockquote>` the cut lands inside. Custom templates convert `<br>` to newlines (Telegram has no `<br>`).
+   - Title fallbacks look up the displayed number first (`invoicenum`, `ordernum`) and the row ID only if nothing matches, using `clone` of the base query for each attempt.
+7. **Send:** `sendWithRetry()` > `sendTelegramMessage()` > `apiRequest()`. cURL when both `curl_init` and `curl_exec` exist (hosts sometimes disable only `curl_exec`; 5 s connect, 10 s total), streams otherwise (requires OpenSSL). `curl_close()` is called only below PHP 8.0 (no-op since 8.0, deprecated in 8.5); the token is redacted from error text. `MAX_RETRIES` (2) is the total number of attempts, not extra retries. Retries only on 429 (honouring `retry_after` up to 5 s) and 5xx, and no new attempt starts after `RETRY_BUDGET` (15 s); network errors are not retried because notifications run inside the admin request. `migrate_to_chat_id` (group upgraded to supergroup) triggers one resend to the new ID plus a `logError()` telling the admin to update the setting; retries reuse the new ID. "can't parse entities" triggers one plain-text resend via `htmlToPlain()`, which turns links into `text (url)` before stripping tags. `validateCredentials()` never echoes unsafe characters from the chat ID.
 
-### Changing Duplicate Prevention Logic
-1. Modify time windows in `isDuplicateNotification()` $windows array
-2. Adjust hash generation in `generateNotificationHash()` to change uniqueness criteria
-3. Modify cleanup interval in `recordNotificationSent()` (currently 24 hours)
+Logging:
+- `logError()` (always on) writes the full text to `logs/error_log.php` and a 300-character line to the Activity Log. `logDebug()` (only with "Enable Debug Logging") writes to the file; the processing entry uses `debugSummary()` so no client personal data is logged.
+- `writeLog()` enforces the owner's requirement that **the plugin log never exceeds 5 MB** (`LOG_MAX_BYTES`): exclusive lock, keep the newest half at a line boundary when full, 64 KB per entry (`LOG_MAX_ENTRY_BYTES`). The cap is read from the private `$logMaxBytes` property, not the constant, so a harness can lower it via `ReflectionProperty` to test rotation without writing 5 MB. The file starts with `LOG_HEADER` (a PHP exit line) because the production server runs nginx (aaPanel), which ignores `.htaccess`; `<?` in logged text is broken up to `< ?`. `logFile()` is public so the panel reads the same path.
 
-## Code Style Conventions
+Use `WHMCS\Database\Capsule` for all DB access, never raw SQL. Never put `transfersecret` or other secrets into messages.
 
-- PSR-4 autoloading with WHMCS namespace structure
-- Use `try-catch` blocks for all database and API operations
-- Log errors via `logDebug()` or `logActivity()` when available
-- Return structured arrays from helper methods
-- Use constants for magic numbers (VERSION, RATE_LIMIT_DEFAULT, MAX_RETRIES)
-- Comprehensive inline comments for complex logic
-- Array destructuring for readability: `['success' => $success, 'error' => $error]`
+### `admin_panel.php` (diagnostics panel)
 
-## Critical Constraints
+Standalone page that requires `../../../init.php`. Access **fails closed**: `$_SESSION['adminid']`, then `CurrentUser` (any error = 403), then `checkPermission()` in no-redirect mode for any of "Configure General Settings", "Configure Addon Modules", "Configure Notifications" (names are not documented). `checkPermission()` lives in `includes/adminfunctions.php`, which init.php does not load for non-admin pages, so the panel loads it from `ROOTDIR`; if the function still does not exist, access is denied. Don't read `$_SESSION['adminusername']`.
 
-- **No Composer dependencies** - Module must work with vanilla WHMCS PHP installation
-- **Database portability** - Use Capsule only, no raw SQL
-- **WHMCS compatibility** - Must implement NotificationModuleInterface contract
-- **Backward compatibility** - Settings changes must not break existing notification rules
-- **Performance** - Minimize database queries, use joins instead of N+1 queries
-- **Security first** - Never log bot tokens, always sanitize output, verify admin access
+- All actions are POST with a session CSRF token (`tgpro_csrf`, compared with `hash_equals`), followed by a 303 redirect (post/redirect/get, result carried in `$_SESSION['tgpro_flash']`) so a refresh never repeats an action. Security headers include a strict CSP (no scripts at all) and `X-Frame-Options`.
+- "Send test" instantiates the module and calls `testConnection()` **on the server**, so it tests the real network path. It tries to read saved provider settings from `tblnotificationproviders` (JSON, then WHMCS `decrypt()` on the whole value and on the token field); a token is used only if it has the bot token format, otherwise the panel asks for it. That storage is undocumented. The token is never echoed into the page.
+- "Check connection" does DNS (`gethostbyname`, then an AAAA lookup for IPv6-only hosts) plus an HTTPS request to `api.telegram.org` without a token; `tgpro_curl_hint()` explains common cURL error numbers (6, 7, 28, 35/60/77).
+- The module class is required only if `class_exists(..., false)` says WHMCS has not loaded it already.
+- There is no proxy support. If the server cannot reach Telegram, the fix is network-side.
+- The log viewer reads the last 64 KB of the log; "Clear log" rewrites the file to `LOG_HEADER`.
+
+## Unverified on a live install
+
+- The exact `tbltickets` / `tblticketreplies` / `tblhostingaddons` / `tblcurrencies.format` columns across WHMCS 8.x/9.x. Lookups degrade gracefully, and debug logging reports failures.
+- The admin-URL shapes used by `detectEntity()` for service, domain and client events.
+- The admin permission names and the `tblnotificationproviders.settings` storage format used by `admin_panel.php`.
